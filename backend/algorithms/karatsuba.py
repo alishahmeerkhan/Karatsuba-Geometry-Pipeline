@@ -11,12 +11,12 @@ class Karatsuba:
 
     def karatsuba(self, num1, num2):
         start_time = time()
-        self.result = self.karatsuba_implementation(num1, num2)
+        self.result = self.algorithm(num1, num2)
         end_time = time()
         self.timer = end_time - start_time
         return self.result
 
-    def karatsuba_implementation(self, num1, num2):
+    def algorithm(self, num1, num2):
         if num1 < 10 or num2 < 10:
             return num1 * num2
 
@@ -27,9 +27,9 @@ class Karatsuba:
         high1, low1 = num1 // power, num1 % power
         high2, low2 = num2 // power, num2 % power
 
-        z0 = self.karatsuba_implementation(low1, low2)
-        z2 = self.karatsuba_implementation(high1, high2)
-        z1 = self.karatsuba_implementation((low1 + high1), (low2 + high2))
+        z0 = self.algorithm(low1, low2)
+        z2 = self.algorithm(high1, high2)
+        z1 = self.algorithm((low1 + high1), (low2 + high2))
 
         return (z2 * 10**(2 * m2)) + ((z1 - z2 - z0) * 10**m2) + z0
 
