@@ -1,0 +1,30 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background-color: #fbfeff;
+    color: #32383c;
+}
+
+.homePage {
+    display: flex;
+    width: 100%;
+    min-height: 100vh;
+}
+
+.Karatsuba,
+.ClosestPair {
+    width: 50%;
+    text-align: center;
+    transition: width 0.4s ease-in-out;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.Karatsuba {
+    border-right: 2px solid #f24500;
+}
