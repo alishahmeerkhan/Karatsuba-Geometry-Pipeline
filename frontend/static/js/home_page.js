@@ -1,5 +1,5 @@
-const HOVERED_WIDTH = 70;
-const NON_HOVERED_WIDTH = 30;
+const HOVERED_WIDTH = 60;
+const NON_HOVERED_WIDTH = 40;
 
 const KaratsubaDiv = document.querySelector('.Karatsuba');
 const ClosestPairDiv = document.querySelector('.ClosestPair');
