@@ -1,0 +1,63 @@
+@font-face {
+    font-family: 'GeistMono';
+    src: url('../assets/fonts/GeistMono-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+} 
+
+.navbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 2rem;
+    background-color: #fbfeff;
+    border-bottom: 2px solid #32383c;
+}
+
+.nav-brand a {
+    font-family: 'GeistMono', monospace;
+    font-size: 2.0rem;
+    font-weight: 700;
+    color: #f24500;
+    text-decoration: none;
+    letter-spacing: -0.5px;
+}
+
+.nav-controls {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.nav-btn {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 600;
+    padding: 0.6rem 1.2rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+.btn-outline {
+    background-color: transparent;
+    border: 2px solid #32383c;
+    color: #32383c;
+    display: inline-block;
+}
+
+.btn-outline:hover {
+    background-color: #32383c;
+    color: #fbfeff;
+}
+
+.btn-accent {
+    background-color: #f24500;
+    border: 2px solid #f24500;
+    color: #fbfeff;
+}
+
+.btn-accent:hover {
+    background-color: #d13c00;
+    border-color: #d13c00;
+}
