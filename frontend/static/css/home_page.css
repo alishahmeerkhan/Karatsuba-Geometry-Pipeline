@@ -23,7 +23,7 @@ h1 {
 }
 
 p {
-    font-size: 1.5rem;
+    font-size: 1.25rem;
     margin: 0;
     color: #32383c;
 }
@@ -64,11 +64,24 @@ p {
 
 .visualizeKaratsuba,
 .visualizeClosestPair {
-    background-color: #f24500;
-    color: #fbfeff;
+    background: linear-gradient(to right, #fafeff 0%, #f24500 50%, #fafeff 100%);
+    background-size: 0% 100%;
+    background-position: center;
+    background-repeat: no-repeat;
+
+    transition: background-size 0.5s ease, color 0.5s ease;
+
+    background-color: #fafeff;
+    color: #f24500;
     border: none;
-    padding: 10px 20px;
+    padding: 10px 120px;
     font-size: 1.2rem;
     cursor: pointer;
     transform: translateY(100px);
+}
+
+.visualizeKaratsuba:hover,
+.visualizeClosestPair:hover {
+    background-size: 100% 100%;
+    color: #fafeff;
 }
