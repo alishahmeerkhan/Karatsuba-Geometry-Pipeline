@@ -38,7 +38,7 @@ def run_closest_pair():
                 continue
             parts = line.split()
             x, y = float(parts[0]), float(parts[1])
-            points.append((f"P{i+1}", (x, y)))
+            points.append((f'P{i+1}', (x, y)))
 
         cp = ClosestPair(points, is2D=True)
         result = cp.closest_pair_2D()
@@ -46,7 +46,8 @@ def run_closest_pair():
         return jsonify({
             'status': 'success',
             'parsed_points': points,
-            'result': "Path to snapshots for future"
+            'result': result,
+            'snapshots': cp.snapshots
         }), 200
 
     except Exception as e:
@@ -55,7 +56,6 @@ def run_closest_pair():
 
 @app.route('/api/karatsuba', methods=['POST'])
 def run_karatsuba():
-    # 1. Check if a file was uploaded
     if 'dataset' not in request.files:
         return jsonify({'error': 'No file uploaded'}), 400
     
@@ -80,7 +80,8 @@ def run_karatsuba():
             'status': 'success',
             'num1': num1,
             'num2': num2,
-            'result': "Path to snapshots for future"
+            'result': result,
+            'snapshots': k.snapshots
         }), 200
 
     except Exception as e:
