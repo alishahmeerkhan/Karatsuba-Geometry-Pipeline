@@ -73,8 +73,8 @@ def run_karatsuba():
         num1 = int(lines[0])
         num2 = int(lines[1])
 
-        k = Karatsuba(num1, num2)
-        result = k.karatsuba()
+        k = Karatsuba()
+        result = k.karatsuba(num1, num2)
 
         return jsonify({
             'status': 'success',
