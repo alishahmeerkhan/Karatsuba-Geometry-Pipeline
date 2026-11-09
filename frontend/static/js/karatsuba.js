@@ -11,7 +11,6 @@ class KaratsubaVisualizer {
         this.steps = [];
         this.currentStep = null;
 
-        // Node size in "tree space" (before scaling)
         this.MAX_NODE_WIDTH = 180;
         this.MAX_NODE_HEIGHT = 85;
         this.X_SPACING = 15;
@@ -20,10 +19,9 @@ class KaratsubaVisualizer {
         this.HEADER_H = 80;
         this.STEP_MS = 1500;
 
-        // Text legibility
-        this.MIN_FONT = 12;       // text is NEVER drawn smaller than this (screen px)
-        this.MIN_NODE_W = 110;    // smallest on-screen node that can hold 12px text
-        this.MIN_NODE_H = 54;     // ...3 lines of 12px text
+        this.MIN_FONT = 12;       
+        this.MIN_NODE_W = 110;    
+        this.MIN_NODE_H = 54;     
 
         this.scale = 1;
         this.offsetX = 0;
@@ -69,7 +67,6 @@ class KaratsubaVisualizer {
         }
     }
 
-    // ---------- 1. Build the Tree ----------
 
     buildTreeDataStructure() {
         this.nodes = [];
@@ -165,7 +162,6 @@ class KaratsubaVisualizer {
         node.children.forEach((ch, i) => { if (!ch.role) ch.role = ['z2', 'z0', 'z1'][i]; });
     }
 
-    // ---------- 2. Build the Animation Steps ----------
 
     buildSteps() {
         if (!this.root) { this.steps = []; return; }
@@ -208,7 +204,6 @@ class KaratsubaVisualizer {
         this.steps = steps;
     }
 
-    // ---------- 3. Layout ----------
 
     calculateTreeLayout() {
         if (!this.root) return;
@@ -254,14 +249,12 @@ class KaratsubaVisualizer {
         const scaleX = availableW / treePhysicalWidth;
         const scaleY = availableH / treePhysicalHeight;
 
-        // Smallest scale at which a node can still hold 12px text (derived, not a magic number)
         const minScale = Math.max(
             this.MIN_NODE_W / this.MAX_NODE_WIDTH,
             this.MIN_NODE_H / this.MAX_NODE_HEIGHT
         );
         this.scale = Math.max(minScale, Math.min(scaleX, scaleY, 1));
 
-        // If the tree doesn't fit at that scale, the canvas grows instead of the text shrinking
         canvas.width = Math.max(innerWidth - 20, (treePhysicalWidth * this.scale) + 60);
         canvas.height = Math.max(innerHeight - 130, (treePhysicalHeight * this.scale) + this.HEADER_H + 60);
 
@@ -270,7 +263,6 @@ class KaratsubaVisualizer {
         this.offsetY = this.HEADER_H + 20;
     }
 
-    // ---------- Drawing Helpers ----------
 
     drawText(text, x, y, font, color, align = 'center') {
         this.context.font = font;
@@ -286,7 +278,7 @@ class KaratsubaVisualizer {
         return s.slice(0, keep) + '..' + s.slice(-keep);
     }
 
-    // Shorten a string to n characters with a middle ellipsis
+
     shorten(text, n) {
         if (text.length <= n) return text;
         const head = Math.ceil((n - 2) / 2);
@@ -294,9 +286,7 @@ class KaratsubaVisualizer {
         return text.slice(0, head) + '..' + text.slice(text.length - tail);
     }
 
-    // Draws text in SCREEN pixels (no canvas scaling applied).
-    // Size = baseSize * scale, but never below MIN_FONT. If the text is still too wide
-    // at the minimum size, the digits are abbreviated rather than the font shrunk.
+
     drawLine(text, x, y, baseSize, bold, color, maxW) {
         const ctx = this.context;
         const font = (sz) => `${bold ? 'bold ' : ''}${sz}px "JetBrains Mono", monospace`;
@@ -333,7 +323,7 @@ class KaratsubaVisualizer {
         ctx.stroke();
     }
 
-    // Edge label in screen pixels, at the midpoint of the edge
+
     drawEdgeLabel(parent, child, label) {
         if (!label) return;
         const ctx = this.context;
@@ -382,7 +372,6 @@ class KaratsubaVisualizer {
         } catch (e) { return ''; }
     }
 
-    // ---------- 4. Rendering one step ----------
 
     renderStep(st) {
         if (!st) return;
@@ -392,7 +381,6 @@ class KaratsubaVisualizer {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Header (already screen-space, 16px / 13px)
         this.drawText(st.phase, 20, 36, 'bold 16px "Inter", sans-serif', '#32383c', 'left');
         ctx.font = 'bold 16px "Inter", sans-serif';
         const phaseW = ctx.measureText(st.phase).width;
@@ -409,7 +397,6 @@ class KaratsubaVisualizer {
 
         const visibleNodes = this.nodes.filter(n => n.depth <= st.visDepth);
 
-        // --- Pass A: shapes (edges + boxes) in scaled tree space ---
         ctx.setTransform(this.scale, 0, 0, this.scale, this.offsetX, this.offsetY);
 
         for (const node of visibleNodes) {
@@ -424,7 +411,6 @@ class KaratsubaVisualizer {
             this.drawRoundedRect(node.x, node.y, this.MAX_NODE_WIDTH, this.MAX_NODE_HEIGHT, 6, border, fill, active);
         }
 
-        // --- Pass B: all text in real screen pixels (never below MIN_FONT) ---
         ctx.setTransform(1, 0, 0, 1, 0, 0);
 
         for (const node of visibleNodes) {
@@ -445,7 +431,6 @@ class KaratsubaVisualizer {
             const y = node.y * this.scale + this.offsetY;
 
             if (divided && node.split) {
-                // 3 lines
                 const LH = Math.min(22, (H - 8) / 3);
                 const s = node.split;
                 const lo = (v) => String(v).padStart(s.m, '0');
@@ -457,7 +442,6 @@ class KaratsubaVisualizer {
                     this.drawLine(`split at 10^${s.m}`, x, y + LH, 13, false, '#64748b', maxW);
                 }
             } else {
-                // 2 lines
                 const LH = Math.min(26, (H - 8) / 2);
                 if (hasResult) {
                     this.drawLine(`${this.fmt(node.operands[0])} × ${this.fmt(node.operands[1])}`, x, y - LH / 2, 14, false, textColor, maxW);
@@ -469,8 +453,6 @@ class KaratsubaVisualizer {
             }
         }
     }
-
-    // ---------- Animation ----------
 
     sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
