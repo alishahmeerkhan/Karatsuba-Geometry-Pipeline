@@ -1,27 +1,33 @@
 const canvas = document.querySelector('canvas');
-canvas.width = innerWidth - 20;
 
 class KaratsubaVisualizer {
     constructor() {
         this.context = canvas.getContext('2d');
-
         this.snapshots = null;
         this.isAnimating = false;
 
         this.nodes = [];
         this.root = null;
-        this.NODE_WIDTH = 260;
-        this.NODE_HEIGHT = 110;
-        this.X_SPACING = 30;
-        this.Y_SPACING = 190;
+        this.steps = [];
+        this.currentStep = null;
+
+        // Node size in "tree space" (before scaling)
+        this.MAX_NODE_WIDTH = 180;
+        this.MAX_NODE_HEIGHT = 85;
+        this.X_SPACING = 15;
+        this.Y_SPACING = 120;
+
+        this.HEADER_H = 80;
+        this.STEP_MS = 1500;
+
+        // Text legibility
+        this.MIN_FONT = 12;       // text is NEVER drawn smaller than this (screen px)
+        this.MIN_NODE_W = 110;    // smallest on-screen node that can hold 12px text
+        this.MIN_NODE_H = 54;     // ...3 lines of 12px text
 
         this.scale = 1;
-        this.MIN_SCALE = 0.3;
         this.offsetX = 0;
-        this.offsetY = 110; // room for the two header lines
-        // false = tree grows as nodes divide (children appear when parent splits)
-        // true  = whole tree skeleton visible from the start
-        this.SHOW_FULL_TREE = false;
+        this.offsetY = 0;
     }
 
     async uploadAndFetchData() {
@@ -30,6 +36,9 @@ class KaratsubaVisualizer {
         this.snapshots = null;
         this.nodes = [];
         this.root = null;
+        this.steps = [];
+        this.currentStep = null;
+
         this.context.setTransform(1, 0, 0, 1, 0, 0);
         this.context.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -50,62 +59,73 @@ class KaratsubaVisualizer {
             if (data.status === 'success') {
                 this.snapshots = data.snapshots;
                 this.buildTreeDataStructure();
-                this.renderFrame(-1);
+                this.buildSteps();
+                this.renderStep(this.steps[0]);
             } else {
-                console.error("API Error:", data.error);
+                console.error('API Error:', data.error);
             }
         } catch (error) {
-            console.error("Fetch failed:", error);
+            console.error('Fetch failed:', error);
         }
     }
 
-    // ---------- Tree construction ----------
+    // ---------- 1. Build the Tree ----------
 
     buildTreeDataStructure() {
         this.nodes = [];
         this.root = null;
         const stack = [];
-        let idCounter = 0;
+        let id = 0;
+        const sameOps = (a, b) => String(a[0]) === String(b[0]) && String(a[1]) === String(b[1]);
 
-        for (let i = 0; i < this.snapshots.length; i++) {
-            const frame = this.snapshots[i];
-
+        for (const frame of this.snapshots) {
             if (frame.step_type === 'split' || frame.step_type === 'base_case') {
                 const node = {
-                    id: idCounter++,
-                    depth: frame.depth,
+                    id: id++,
+                    depth: 0,
                     operands: frame.operands,
                     children: [],
-                    createIdx: i,
-                    combineIdx: frame.step_type === 'base_case' ? i : Infinity,
-                    result: frame.step_type === 'base_case' ? frame.result : null,
                     isBase: frame.step_type === 'base_case',
+                    result: frame.step_type === 'base_case' ? frame.result : null,
                     split: null,
                     role: null,
-                    width: 0, x: 0, y: 0
+                    treeWidth: 0,
+                    x: 0, y: 0
                 };
-
                 this.nodes.push(node);
-                frame.nodeRef = node;
 
                 if (stack.length > 0) {
                     const parent = stack[stack.length - 1];
                     parent.children.push(node);
                     node.parent = parent;
-                } else {
+                } else if (!this.root) {
                     this.root = node;
+                } else {
+                    this.root.children.push(node);
+                    node.parent = this.root;
                 }
 
                 if (frame.step_type === 'split') stack.push(node);
             } else if (frame.step_type === 'combine') {
-                const node = stack.pop();
-                node.combineIdx = i;
+                let idx = -1;
+                if (frame.operands) {
+                    for (let i = stack.length - 1; i >= 0; i--) {
+                        if (sameOps(stack[i].operands, frame.operands)) { idx = i; break; }
+                    }
+                    if (idx === -1) continue;
+                } else {
+                    idx = stack.length - 1;
+                }
+                if (idx < 0) continue;
+                const node = stack[idx];
                 node.result = frame.result;
-                frame.nodeRef = node;
+                stack.length = idx;
             }
         }
 
-        // Work out HOW each node divides (a, b, c, d, m) and which child is which
+        const setDepth = (n, d) => { n.depth = d; n.children.forEach(c => setDepth(c, d + 1)); };
+        if (this.root) setDepth(this.root, 0);
+
         for (const n of this.nodes) {
             if (!n.isBase) this.computeSplit(n);
         }
@@ -113,9 +133,6 @@ class KaratsubaVisualizer {
         this.calculateTreeLayout();
     }
 
-    // Figures out the split point by matching the children's operands.
-    // x = a*10^m + b,  y = c*10^m + d
-    // children: a×c (z2),  b×d (z0),  (a+b)×(c+d) (z1)
     computeSplit(node) {
         let x, y;
         try {
@@ -139,53 +156,121 @@ class KaratsubaVisualizer {
 
         node.split = { m: best.m, a: best.a, b: best.b, c: best.c, d: best.d };
 
-        // Tag each child with its role (z2 / z0 / z1)
         const used = new Set();
         for (const role of ['z2', 'z0', 'z1']) {
             const child = node.children.find(ch =>
                 !used.has(ch.id) && `${ch.operands[0]}|${ch.operands[1]}` === best.keys[role]);
             if (child) { child.role = role; used.add(child.id); }
         }
-        // Fallback: if matching failed, assume the order z2, z0, z1
         node.children.forEach((ch, i) => { if (!ch.role) ch.role = ['z2', 'z0', 'z1'][i]; });
     }
 
-    // ---------- Layout ----------
+    // ---------- 2. Build the Animation Steps ----------
 
-    calculateTreeLayout() {
-        const calcWidth = (n) => {
-            if (n.children.length === 0) {
-                n.width = this.NODE_WIDTH + this.X_SPACING;
-            } else {
-                n.width = 0;
-                n.children.forEach(c => { calcWidth(c); n.width += c.width; });
-            }
-        };
-        calcWidth(this.root);
+    buildSteps() {
+        if (!this.root) { this.steps = []; return; }
+        const maxD = Math.max(...this.nodes.map(n => n.depth));
+        const steps = [];
+        const r = this.root;
 
-        let maxDepth = 0;
-        const assignPositions = (n, startX) => {
-            if (n.depth > maxDepth) maxDepth = n.depth;
-            n.y = (this.NODE_HEIGHT / 2) + (n.depth * this.Y_SPACING);
-            n.x = startX + (n.width / 2);
-            let currentX = startX;
-            n.children.forEach(c => { assignPositions(c, currentX); currentX += c.width; });
-        };
-        assignPositions(this.root, 0);
+        steps.push({
+            phase: 'START',
+            text: `Multiply ${this.fmt(r.operands[0], 30)} × ${this.fmt(r.operands[1], 30)}`,
+            visDepth: 0, baseDone: false, mergedFrom: Infinity, active: []
+        });
 
-        const available = innerWidth - 20;
-        const treeWidth = this.root.width;
-        this.scale = Math.max(this.MIN_SCALE, Math.min(1, available / treeWidth));
+        for (let d = 0; d < maxD; d++) {
+            steps.push({
+                phase: 'DIVIDE',
+                text: `Level ${d}: split each number into high and low halves`,
+                visDepth: d + 1, baseDone: false, mergedFrom: Infinity,
+                active: this.nodes.filter(n => n.depth === d && !n.isBase)
+            });
+        }
 
-        const scaledWidth = treeWidth * this.scale;
-        canvas.width = Math.max(available, scaledWidth);
-        this.offsetX = (canvas.width - scaledWidth) / 2;
+        steps.push({
+            phase: 'BASE CASE',
+            text: 'Smallest numbers are multiplied directly',
+            visDepth: maxD, baseDone: true, mergedFrom: Infinity,
+            active: this.nodes.filter(n => n.isBase)
+        });
 
-        const treeHeight = (maxDepth * this.Y_SPACING + this.NODE_HEIGHT + 20) * this.scale;
-        canvas.height = Math.max(innerHeight - 130, this.offsetY + treeHeight);
+        for (let d = maxD - 1; d >= 0; d--) {
+            const active = this.nodes.filter(n => n.depth === d && !n.isBase);
+            if (active.length === 0) continue;
+            steps.push({
+                phase: 'MERGE',
+                text: `Level ${d}: combine the 3 results of each node`,
+                visDepth: maxD, baseDone: true, mergedFrom: d,
+                active
+            });
+        }
+        this.steps = steps;
     }
 
-    // ---------- Drawing helpers ----------
+    // ---------- 3. Layout ----------
+
+    calculateTreeLayout() {
+        if (!this.root) return;
+
+        const setSubtreeWidths = (n) => {
+            if (n.children.length === 0) {
+                n.treeWidth = this.MAX_NODE_WIDTH + this.X_SPACING;
+            } else {
+                n.treeWidth = 0;
+                n.children.forEach(c => {
+                    setSubtreeWidths(c);
+                    n.treeWidth += c.treeWidth;
+                });
+            }
+        };
+        setSubtreeWidths(this.root);
+
+        const assignCoords = (n, startX) => {
+            n.x = startX + (n.treeWidth / 2);
+            n.y = (n.depth * this.Y_SPACING);
+
+            let currentX = startX;
+            n.children.forEach(c => {
+                assignCoords(c, currentX);
+                currentX += c.treeWidth;
+            });
+        };
+        assignCoords(this.root, 0);
+
+        let minX = Infinity, maxX = -Infinity, maxY = -Infinity;
+        this.nodes.forEach(n => {
+            minX = Math.min(minX, n.x - this.MAX_NODE_WIDTH / 2);
+            maxX = Math.max(maxX, n.x + this.MAX_NODE_WIDTH / 2);
+            maxY = Math.max(maxY, n.y + this.MAX_NODE_HEIGHT / 2);
+        });
+
+        const treePhysicalWidth = maxX - minX;
+        const treePhysicalHeight = maxY;
+
+        const availableW = innerWidth - 40;
+        const availableH = (innerHeight - 130) - this.HEADER_H - 40;
+
+        const scaleX = availableW / treePhysicalWidth;
+        const scaleY = availableH / treePhysicalHeight;
+
+        // Smallest scale at which a node can still hold 12px text (derived, not a magic number)
+        const minScale = Math.max(
+            this.MIN_NODE_W / this.MAX_NODE_WIDTH,
+            this.MIN_NODE_H / this.MAX_NODE_HEIGHT
+        );
+        this.scale = Math.max(minScale, Math.min(scaleX, scaleY, 1));
+
+        // If the tree doesn't fit at that scale, the canvas grows instead of the text shrinking
+        canvas.width = Math.max(innerWidth - 20, (treePhysicalWidth * this.scale) + 60);
+        canvas.height = Math.max(innerHeight - 130, (treePhysicalHeight * this.scale) + this.HEADER_H + 60);
+
+        const scaledWidth = treePhysicalWidth * this.scale;
+        this.offsetX = ((canvas.width - scaledWidth) / 2) - (minX * this.scale);
+        this.offsetY = this.HEADER_H + 20;
+    }
+
+    // ---------- Drawing Helpers ----------
 
     drawText(text, x, y, font, color, align = 'center') {
         this.context.font = font;
@@ -194,36 +279,76 @@ class KaratsubaVisualizer {
         this.context.fillText(text, x, y);
     }
 
-    // Shorten only very long numbers, keeping both ends visible
     fmt(v, max = 16) {
         const s = String(v);
         if (s.length <= max) return s;
-        const keep = Math.floor((max - 1) / 2);
-        return s.slice(0, keep) + '…' + s.slice(-keep);
+        const keep = Math.floor((max - 2) / 2);
+        return s.slice(0, keep) + '..' + s.slice(-keep);
     }
 
-    drawEdge(px, py, cx, cy, color, label) {
+    // Shorten a string to n characters with a middle ellipsis
+    shorten(text, n) {
+        if (text.length <= n) return text;
+        const head = Math.ceil((n - 2) / 2);
+        const tail = Math.floor((n - 2) / 2);
+        return text.slice(0, head) + '..' + text.slice(text.length - tail);
+    }
+
+    // Draws text in SCREEN pixels (no canvas scaling applied).
+    // Size = baseSize * scale, but never below MIN_FONT. If the text is still too wide
+    // at the minimum size, the digits are abbreviated rather than the font shrunk.
+    drawLine(text, x, y, baseSize, bold, color, maxW) {
         const ctx = this.context;
-        const sx = px, sy = py + this.NODE_HEIGHT / 2;
-        const ex = cx, ey = cy - this.NODE_HEIGHT / 2;
+        const font = (sz) => `${bold ? 'bold ' : ''}${sz}px "JetBrains Mono", monospace`;
+
+        let size = Math.max(this.MIN_FONT, baseSize * this.scale);
+        ctx.font = font(size);
+        while (size > this.MIN_FONT && ctx.measureText(text).width > maxW) {
+            size = Math.max(this.MIN_FONT, size - 0.5);
+            ctx.font = font(size);
+        }
+
+        let t = text;
+        if (ctx.measureText(t).width > maxW) {
+            for (let n = text.length - 1; n >= 5; n--) {
+                t = this.shorten(text, n);
+                if (ctx.measureText(t).width <= maxW) break;
+            }
+        }
+
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(t, x, y);
+        ctx.textBaseline = 'alphabetic';
+    }
+
+    drawEdgeLine(px, py, cx, cy, color) {
+        const ctx = this.context;
         ctx.beginPath();
-        ctx.moveTo(sx, sy);
-        ctx.lineTo(ex, ey);
+        ctx.moveTo(px, py + this.MAX_NODE_HEIGHT / 2);
+        ctx.lineTo(cx, cy - this.MAX_NODE_HEIGHT / 2);
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.stroke();
-
-        if (label) {
-            const mx = (sx + ex) / 2, my = (sy + ey) / 2;
-            ctx.font = 'bold 12px "JetBrains Mono", monospace';
-            const w = ctx.measureText(label).width + 12;
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(mx - w / 2, my - 10, w, 20);
-            this.drawText(label, mx, my + 4, 'bold 12px "JetBrains Mono", monospace', color === '#e2e8f0' ? '#94a3b8' : '#475569');
-        }
     }
 
-    drawRoundedRect(x, y, w, h, r, borderColor, fillColor) {
+    // Edge label in screen pixels, at the midpoint of the edge
+    drawEdgeLabel(parent, child, label) {
+        if (!label) return;
+        const ctx = this.context;
+        const mx = ((parent.x + child.x) / 2) * this.scale + this.offsetX;
+        const my = (((parent.y + this.MAX_NODE_HEIGHT / 2) + (child.y - this.MAX_NODE_HEIGHT / 2)) / 2) * this.scale + this.offsetY;
+
+        const size = Math.max(this.MIN_FONT, 14 * this.scale);
+        ctx.font = `bold ${size}px "JetBrains Mono", monospace`;
+        const w = ctx.measureText(label).width + 8;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(mx - w / 2, my - (size / 2 + 2), w, size + 4);
+        this.drawLine(label, mx, my, 14, true, '#64748b', 9999);
+    }
+
+    drawRoundedRect(x, y, w, h, r, border, fill, isBold) {
         const c = this.context;
         c.beginPath();
         c.moveTo(x - w/2 + r, y - h/2);
@@ -236,136 +361,126 @@ class KaratsubaVisualizer {
         c.lineTo(x - w/2, y - h/2 + r);
         c.quadraticCurveTo(x - w/2, y - h/2, x - w/2 + r, y - h/2);
         c.closePath();
-        c.fillStyle = fillColor;
+        c.fillStyle = fill;
         c.fill();
-        c.strokeStyle = borderColor;
-        c.lineWidth = 2;
+        c.strokeStyle = border;
+        c.lineWidth = isBold ? 4 : 2;
         c.stroke();
     }
 
     edgeLabel(child) {
-        const s = child.parent && child.parent.split;
-        if (!s) return '';
-        if (child.role === 'z2') return 'a×c';
-        if (child.role === 'z0') return 'b×d';
-        if (child.role === 'z1') return '(a+b)×(c+d)';
-        return '';
+        return { z2: 'a×c', z0: 'b×d', z1: '(a+b)×(c+d)' }[child.role] || '';
     }
 
-    // Merge formula shown in the header when a node combines
     mergeFormula(node) {
         const s = node.split;
         if (!s) return '';
         try {
-            const get = (role) => {
-                const ch = node.children.find(c => c.role === role);
-                return BigInt(String(ch.result));
-            };
+            const get = (role) => BigInt(String(node.children.find(c => c.role === role).result));
             const z2 = get('z2'), z0 = get('z0'), z1 = get('z1');
-            const mid = z1 - z2 - z0;
-            return `z2=${z2}  z0=${z0}  z1=${z1}  →  z1−z2−z0 = ${mid}   |   ` +
-                   `${z2}·10^${2 * s.m} + ${mid}·10^${s.m} + ${z0} = ${node.result}`;
+            return `${this.fmt(z2, 12)}·10^${2 * s.m} + (${this.fmt(z1, 12)} − ${this.fmt(z2, 12)} − ${this.fmt(z0, 12)})·10^${s.m} + ${this.fmt(z0, 12)} = ${this.fmt(node.result, 24)}`;
         } catch (e) { return ''; }
     }
 
-    // ---------- Rendering ----------
+    // ---------- 4. Rendering one step ----------
 
-    renderFrame(frameIdx) {
+    renderStep(st) {
+        if (!st) return;
+        this.currentStep = st;
         const ctx = this.context;
+
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        const frame = frameIdx >= 0 ? this.snapshots[frameIdx] : null;
+        // Header (already screen-space, 16px / 13px)
+        this.drawText(st.phase, 20, 36, 'bold 16px "Inter", sans-serif', '#32383c', 'left');
+        ctx.font = 'bold 16px "Inter", sans-serif';
+        const phaseW = ctx.measureText(st.phase).width;
+        this.drawText(st.text, 20 + phaseW + 14, 36, '16px "Inter", sans-serif', '#32383c', 'left');
 
-        // ----- Header (phase + description + formula) -----
-        let phase = '', phaseColor = '#32383c';
-        if (frame) {
-            if (frame.step_type === 'split')     { phase = 'DIVIDE';     phaseColor = '#3b82f6'; }
-            if (frame.step_type === 'base_case') { phase = 'BASE CASE';  phaseColor = '#f24500'; }
-            if (frame.step_type === 'combine')   { phase = 'MERGE';      phaseColor = '#28a745'; }
-        }
-        if (frame) {
-            this.drawText(phase, 20, 36, 'bold 16px "Inter", sans-serif', phaseColor, 'left');
-            this.drawText(frame.description || '', 120, 36, '16px "Inter", sans-serif', '#32383c', 'left');
-            if (frame.step_type === 'combine' && frame.nodeRef) {
-                this.drawText(this.mergeFormula(frame.nodeRef), 20, 66, '13px "JetBrains Mono", monospace', '#28a745', 'left');
-            } else if (frame.step_type === 'split' && frame.nodeRef && frame.nodeRef.split) {
-                const s = frame.nodeRef.split;
-                this.drawText(
-                    `Split at 10^${s.m}:  a=${s.a}, b=${s.b}  |  c=${s.c}, d=${s.d}   →   a×c,  b×d,  (a+b)×(c+d)`,
-                    20, 66, '13px "JetBrains Mono", monospace', '#3b82f6', 'left');
-            }
-        } else {
-            this.drawText('Tree compiled. Press start to animate.', 20, 40, '18px "Inter", sans-serif', '#32383c', 'left');
+        if (st.phase === 'MERGE' && st.active.length) {
+            this.drawText('z2·10^2m + (z1 − z2 − z0)·10^m + z0  →  ' + this.mergeFormula(st.active[0]),
+                20, 66, '13px "JetBrains Mono", monospace', '#32383c', 'left');
+        } else if (st.phase === 'DIVIDE' && st.active.length && st.active[0].split) {
+            const s = st.active[0].split;
+            this.drawText(`x = a·10^${s.m} + b,  y = c·10^${s.m} + d     →     a×c,  b×d,  (a+b)×(c+d)`,
+                20, 66, '13px "JetBrains Mono", monospace', '#32383c', 'left');
         }
 
+        const visibleNodes = this.nodes.filter(n => n.depth <= st.visDepth);
+
+        // --- Pass A: shapes (edges + boxes) in scaled tree space ---
         ctx.setTransform(this.scale, 0, 0, this.scale, this.offsetX, this.offsetY);
 
-        // ----- Edges -----
-        for (const node of this.nodes) {
+        for (const node of visibleNodes) {
             if (!node.parent) continue;
-            const visible = this.SHOW_FULL_TREE || node.parent.createIdx <= frameIdx;
-            if (!visible) continue;
-            const color = (node.createIdx <= frameIdx) ? '#94a3b8' : '#e2e8f0';
-            const showLabel = node.parent.createIdx <= frameIdx; // label once the parent has split
-            this.drawEdge(node.parent.x, node.parent.y, node.x, node.y, color,
-                          showLabel ? this.edgeLabel(node) : '');
+            this.drawEdgeLine(node.parent.x, node.parent.y, node.x, node.y, '#cbd5e1');
         }
 
-        // ----- Nodes -----
-        for (const node of this.nodes) {
-            const isVisible = this.SHOW_FULL_TREE || !node.parent || node.parent.createIdx <= frameIdx;
-            if (!isVisible) continue;
+        for (const node of visibleNodes) {
+            const active = st.active.includes(node);
+            const border = active ? '#f24500' : '#cbd5e1';
+            const fill = active ? '#fff5f0' : '#ffffff';
+            this.drawRoundedRect(node.x, node.y, this.MAX_NODE_WIDTH, this.MAX_NODE_HEIGHT, 6, border, fill, active);
+        }
 
-            const isPending = node.createIdx > frameIdx;
-            const isCombined = node.combineIdx <= frameIdx;
-            const isActive = frame && frame.nodeRef === node;
-            const hasSplit = !node.isBase && node.split && node.createIdx <= frameIdx;
+        // --- Pass B: all text in real screen pixels (never below MIN_FONT) ---
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-            let border, fill, text, res;
-            if (isActive)        { border = '#f24500'; fill = '#fff5f0'; text = '#f24500'; res = '#f24500'; }
-            else if (isCombined) { border = '#28a745'; fill = '#f6fdf8'; text = '#555';    res = '#28a745'; }
-            else if (isPending)  { border = '#cbd5e1'; fill = '#f8fafc'; text = '#94a3b8'; res = '#94a3b8'; }
-            else                 { border = '#3b82f6'; fill = '#eff6ff'; text = '#3b82f6'; res = '#3b82f6'; }
+        for (const node of visibleNodes) {
+            if (node.parent) this.drawEdgeLabel(node.parent, node, this.edgeLabel(node));
+        }
 
-            this.drawRoundedRect(node.x, node.y, this.NODE_WIDTH, this.NODE_HEIGHT, 10, border, fill);
+        const W = this.MAX_NODE_WIDTH * this.scale;
+        const H = this.MAX_NODE_HEIGHT * this.scale;
+        const maxW = W - 12;
+        const textColor = '#32383c';
 
-            const x = node.x, y = node.y;
-            const opStr = `${this.fmt(node.operands[0])} × ${this.fmt(node.operands[1])}`;
-            const mono = (sz, b = false) => `${b ? 'bold ' : ''}${sz}px "JetBrains Mono", monospace`;
+        for (const node of visibleNodes) {
+            const divided = !node.isBase && node.depth < st.visDepth;
+            const merged = !node.isBase && node.depth >= st.mergedFrom;
+            const hasResult = node.isBase ? st.baseDone : merged;
 
-            if (hasSplit) {
+            const x = node.x * this.scale + this.offsetX;
+            const y = node.y * this.scale + this.offsetY;
+
+            if (divided && node.split) {
+                // 3 lines
+                const LH = Math.min(22, (H - 8) / 3);
                 const s = node.split;
-                this.drawText(opStr, x, y - 33, mono(14, true), text);
-                this.drawText(`a=${this.fmt(s.a, 8)}  b=${this.fmt(s.b, 8)}`, x, y - 10, mono(12), text);
-                this.drawText(`c=${this.fmt(s.c, 8)}  d=${this.fmt(s.d, 8)}`, x, y + 8, mono(12), text);
-                if (isCombined) {
-                    this.drawText(`= ${this.fmt(node.result, 20)}`, x, y + 35, mono(14, true), res);
+                const lo = (v) => String(v).padStart(s.m, '0');
+                this.drawLine(`${this.fmt(s.a, 8)} | ${this.fmt(lo(s.b), 8)}`, x, y - LH, 15, true, textColor, maxW);
+                this.drawLine(`× ${this.fmt(s.c, 8)} | ${this.fmt(lo(s.d), 8)}`, x, y, 15, true, textColor, maxW);
+                if (hasResult) {
+                    this.drawLine(`= ${this.fmt(node.result, 18)}`, x, y + LH, 16, true, textColor, maxW);
                 } else {
-                    this.drawText(`split at 10^${s.m}`, x, y + 35, mono(11), text);
+                    this.drawLine(`split at 10^${s.m}`, x, y + LH, 13, false, '#64748b', maxW);
                 }
-            } else if (isCombined) {
-                this.drawText(opStr, x, y - 8, mono(12), text);
-                this.drawText(`= ${this.fmt(node.result, 20)}`, x, y + 16, mono(14, true), res);
             } else {
-                this.drawText(opStr, x, y + 5, mono(14, true), text);
+                // 2 lines
+                const LH = Math.min(26, (H - 8) / 2);
+                if (hasResult) {
+                    this.drawLine(`${this.fmt(node.operands[0])} × ${this.fmt(node.operands[1])}`, x, y - LH / 2, 14, false, textColor, maxW);
+                    this.drawLine(`= ${this.fmt(node.result, 18)}`, x, y + LH / 2, 17, true, textColor, maxW);
+                } else {
+                    this.drawLine(`${this.fmt(node.operands[0], 16)}`, x, y - LH / 2, 16, true, textColor, maxW);
+                    this.drawLine(`× ${this.fmt(node.operands[1], 16)}`, x, y + LH / 2, 16, true, textColor, maxW);
+                }
             }
         }
-
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
     // ---------- Animation ----------
 
-    sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+    sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
     async animate() {
-        if (!this.snapshots || this.isAnimating) return;
+        if (this.steps.length === 0 || this.isAnimating) return;
         this.isAnimating = true;
 
-        for (let i = 0; i < this.snapshots.length; i++) {
-            this.renderFrame(i);
-            await this.sleep(1200);
+        for (const st of this.steps) {
+            this.renderStep(st);
+            await this.sleep(this.STEP_MS);
         }
 
         this.isAnimating = false;
@@ -373,18 +488,11 @@ class KaratsubaVisualizer {
 }
 
 const visualizer = new KaratsubaVisualizer();
-
-document.getElementById('dataset-upload').addEventListener('change', () => {
-    visualizer.uploadAndFetchData();
-});
-
-document.getElementById('start-animation-btn').addEventListener('click', () => {
-    visualizer.animate();
-});
-
+document.getElementById('dataset-upload').addEventListener('change', () => visualizer.uploadAndFetchData());
+document.getElementById('start-animation-btn').addEventListener('click', () => visualizer.animate());
 window.addEventListener('resize', () => {
     if (visualizer.root && !visualizer.isAnimating) {
         visualizer.calculateTreeLayout();
-        visualizer.renderFrame(-1);
+        visualizer.renderStep(visualizer.currentStep || visualizer.steps[0]);
     }
 });
