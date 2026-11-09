@@ -9,11 +9,11 @@ def generate_test_cases():
     os.makedirs(out_dir, exist_ok=True)
 
     cp_configs = [
-        ('01_base_case', 3, 'random'),
-        ('02_small', 15, 'random'),
-        ('03_edge_vertical', 50, 'vertical'),
-        ('04_edge_horizontal', 50, 'horizontal'),
-        ('05_medium', 100, 'random'),
+        ('01_base_case', 110, 'random'),
+        ('02_small', 150, 'random'),
+        ('03_edge_vertical', 250, 'vertical'),
+        ('04_edge_horizontal', 130, 'horizontal'),
+        ('05_medium', 300, 'random'),
         ('06_edge_clusters', 200, 'clusters'),
         ('07_large', 1000, 'random'),
         ('08_very_large', 10000, 'random'),
@@ -38,24 +38,16 @@ def generate_test_cases():
                 
                 f.write(f'{x:.4f} {y:.4f}\n')
 
-
-    def random_number(digits):
-        if digits == 1:
-            return random.randint(1, 9)
-        lower = 10**(digits - 1)
-        upper = (10**digits) - 1
-        return random.randint(lower, upper)
-
     km_configs = [
-        ('01_base_case', 1, 1, False),
-        ('02_small_odd', 3, 3, False),
-        ('03_mismatched', 2, 5, False),
-        ('04_edge_zeroes', 8, 8, True),
-        ('05_medium', 16, 16, False),
-        ('06_large', 64, 64, False),
-        ('07_large_mismatched', 128, 47, False),
-        ('08_very_large', 512, 512, False),
-        ('09_massive', 1024, 1024, False),
+        ('01_base_case', 105, 105, False),
+        ('02_small_odd', 125, 125, False),
+        ('03_mismatched', 110, 160, False),
+        ('04_edge_zeroes', 130, 130, True),
+        ('05_medium', 256, 256, False),
+        ('06_large', 512, 512, False),
+        ('07_large_mismatched', 600, 147, False),
+        ('08_very_large', 1024, 1024, False),
+        ('09_massive', 2048, 2048, False),
         ('10_stress_test', 5000, 5000, False)
     ]
 
@@ -71,6 +63,13 @@ def generate_test_cases():
             f.write(f'{num1}\n{num2}\n')
 
     print(f'Successfully generated 20 test cases in \'{out_dir}\'')
+
+def random_number(digits):
+        if digits == 1:
+            return random.randint(1, 9)
+        lower = 10**(digits - 1)
+        upper = (10**digits) - 1
+        return random.randint(lower, upper)
 
 if __name__ == '__main__':
     generate_test_cases()
